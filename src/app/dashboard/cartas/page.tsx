@@ -1,17 +1,5 @@
-export default function CartasPage() {
-    return (
-        <section className="space-y-4">
-            <header className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs font-semibold tracking-widest text-cyan-700 uppercase dark:text-cyan-300">Modulo</p>
-                <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-slate-100">Mis cartas</h1>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                    Consulta, filtra y administra todas las cartas generadas en tu cuenta.
-                </p>
-            </header>
+import CartasList from '@/modules/cartas/components/CartasList'
 
-            <article className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                Tabla de cartas pendiente: agregar busqueda, estado y acciones.
-            </article>
-        </section>
-    )
+export default function Page() {
+    return <CartasList />
 }
