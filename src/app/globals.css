@@ -1,17 +1,11 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --background: #08111d;
-  --surface: rgba(12, 25, 42, 0.75);
-  --surface-strong: rgba(10, 21, 36, 0.92);
-  --foreground: #ecf2ff;
-  --muted: #98a9cc;
-  --primary: #f4a70a;
-  --primary-strong: #d79208;
-  --accent: #43d6b5;
-  --danger: #f87171;
-  --ring: rgba(67, 214, 181, 0.45);
-  --shadow: 0 30px 80px rgba(1, 6, 12, 0.6);
+  --background: #f6f8fb;
+  --foreground: #0f172a;
+  --panel: #ffffff;
+  --panel-muted: #eef2ff;
 }
 
 @theme inline {
@@ -21,35 +15,17 @@
   --font-mono: var(--font-ibm-plex-mono);
 }
 
+.dark {
+  --background: #020617;
+  --foreground: #e2e8f0;
+  --panel: #0b1220;
+  --panel-muted: #111a2c;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-space-grotesk), sans-serif;
-  position: relative;
   overflow-x: hidden;
-}
-
-body::before,
-body::after {
-  content: '';
-  position: fixed;
-  inset: auto;
-  width: 45vmax;
-  height: 45vmax;
-  border-radius: 999px;
-  filter: blur(70px);
-  pointer-events: none;
-  z-index: -1;
-}
-
-body::before {
-  top: -20vmax;
-  right: -15vmax;
-  background: rgba(244, 167, 10, 0.22);
-}
-
-body::after {
-  bottom: -24vmax;
-  left: -16vmax;
-  background: rgba(67, 214, 181, 0.2);
+  transition: background-color 180ms ease, color 180ms ease;
 }
