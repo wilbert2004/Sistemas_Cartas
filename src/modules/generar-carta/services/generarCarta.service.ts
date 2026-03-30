@@ -42,6 +42,69 @@ const getTiposCarta = async (): Promise<TipoCarta[]> => {
   return (data ?? []) as TipoCarta[]
 }
 
+const normalizarLimiteCartas = (raw: unknown): number => {
+  if (raw === null || raw === undefined) return Number.POSITIVE_INFINITY
+
+  const limite = Number(raw)
+
+  if (!Number.isFinite(limite)) return Number.POSITIVE_INFINITY
+  if (limite <= 0) return Number.POSITIVE_INFINITY
+
+  return Math.trunc(limite)
+}
+
+const obtenerLimiteCartasUsuario = async (usuarioId: string) => {
+  const client = getSupabaseClient()
+
+  const { data, error } = await client
+    .from('suscripciones')
+    .select(
+      `
+        *,
+        planes (limite_cartas)
+      `
+    )
+    .eq('usuario_id', usuarioId)
+    .eq('estado', 'activo')
+    .single()
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      throw new Error('No se encontro una suscripcion activa para el usuario.')
+    }
+
+    throw error
+  }
+
+  const relacionPlan = Array.isArray(data?.planes) ? data.planes[0] : data?.planes
+  return normalizarLimiteCartas(relacionPlan?.limite_cartas)
+}
+
+const validarLimiteCartasUsuario = async (usuarioId: string) => {
+  const client = getSupabaseClient()
+
+  const limiteCartas = await obtenerLimiteCartasUsuario(usuarioId)
+
+  if (!Number.isFinite(limiteCartas)) {
+    return
+  }
+
+  const { count, error } = await client
+    .from('cartas')
+    .select('*', { count: 'exact', head: true })
+    .eq('usuario_id', usuarioId)
+
+  if (error) throw error
+
+  const cantidadActual = count ?? 0
+
+  if (cantidadActual >= limiteCartas) {
+    throw new Error(
+      `Alcanzaste el limite de ${limiteCartas} cartas de tu suscripcion actual.`
+    )
+  }
+}
+
 const guardarCarta = async ({
   tipo_carta_id,
   titulo,
@@ -66,6 +129,8 @@ const guardarCarta = async ({
   if (!user) {
     throw new Error('No hay una sesion activa para guardar la carta.')
   }
+
+  await validarLimiteCartasUsuario(user.id)
 
   const payload = {
     usuario_id: user.id,
