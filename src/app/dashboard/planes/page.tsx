@@ -1,5 +1,5 @@
-import PlanesView from '@/modules/planes/components/PlanesView'
+import SuscripcionPage from '@/modules/suscripcion/components/SuscripcionPage'
 
 export default function Page() {
-    return <PlanesView />
+    return <SuscripcionPage />
 }
