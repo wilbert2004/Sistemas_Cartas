@@ -64,6 +64,64 @@ const guardarUsuarioEnTabla = async (payload: {
   if (error) throw error
 }
 
+const obtenerIdPlanGratis = async () => {
+  const client = getSupabaseClient()
+
+  const { data, error } = await client
+    .from('planes')
+    .select('id, nombre')
+    .ilike('nombre', 'gratis')
+    .limit(1)
+
+  if (error) throw error
+
+  const planGratis = data?.[0]
+  if (!planGratis?.id) {
+    throw new Error('No se encontro el plan gratis en la tabla planes.')
+  }
+
+  return String(planGratis.id)
+}
+
+const asegurarSuscripcionGratis = async (usuarioId: string) => {
+  const client = getSupabaseClient()
+
+  const { data: suscripcionExistente, error: consultaError } = await client
+    .from('suscripciones')
+    .select('id')
+    .eq('usuario_id', usuarioId)
+    .limit(1)
+
+  if (consultaError) throw consultaError
+
+  if ((suscripcionExistente?.length ?? 0) > 0) {
+    return suscripcionExistente[0]
+  }
+
+  const planGratisId = await obtenerIdPlanGratis()
+
+  const { data, error } = await client
+    .from('suscripciones')
+    .insert({
+      usuario_id: usuarioId,
+      plan_id: planGratisId,
+      estado: 'activo',
+      fecha_inicio: new Date().toISOString(),
+    })
+    .select()
+    .single()
+
+  // Si ocurre una carrera y otra operación crea la suscripción primero,
+  // se considera estado consistente y no se rompe el registro.
+  if (error?.code === '23505') {
+    return null
+  }
+
+  if (error) throw error
+
+  return data
+}
+
 const obtenerNombreDesdeMetadata = (user: User) => {
   const metadata = user.user_metadata as Record<string, unknown> | null
 
@@ -114,6 +172,8 @@ export const sincronizarUsuarioAutenticado = async (user?: User) => {
 
   if (error) throw error
 
+  await asegurarSuscripcionGratis(usuarioAuth.id)
+
   return payload
 }
 
@@ -159,6 +219,8 @@ export const registrarUsuario = async ({
     email,
     nombre,
   })
+
+  await asegurarSuscripcionGratis(userId)
 
   return data
 }

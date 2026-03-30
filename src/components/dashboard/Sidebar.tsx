@@ -23,7 +23,7 @@ const items = [
     { href: '/dashboard/generar', label: 'Generar', icon: Sparkles },
     { href: '/dashboard/cartas', label: 'Cartas', icon: FileStack },
     { href: '/dashboard/perfil', label: 'Perfil', icon: UserRound },
-    { href: '/dashboard/suscripcion', label: 'Suscripcion', icon: BadgeDollarSign },
+    { href: '/dashboard/planes', label: 'Suscripcion', icon: BadgeDollarSign },
 ]
 
 const obtenerIniciales = (nombre: string, email: string) => {
