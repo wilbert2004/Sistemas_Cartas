@@ -26,3 +26,6 @@ export const obtenerPlanes = async () => {
   return data
 }
 
+// prueba rápida (solo para testear)
+obtenerPlanes().then((planes) => console.log('Planes:', planes))
+
