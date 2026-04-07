@@ -33,13 +33,13 @@ export const PLANES_REFERENCIA: PlanSuscripcion[] = [
     id: '727b8e67-1e00-45c2-9aab-6a8652e7fc92',
     nombre: 'pro',
     limite_cartas: 9999,
-    precio: '99',
+    precio: '50',
     activo: true,
   },
   {
     id: 'f02a5d25-a431-48cf-aa34-f82a5ecf45f7',
     nombre: 'gratis',
-    limite_cartas: 3,
+    limite_cartas: 10,
     precio: '0',
     activo: true,
   },
@@ -55,12 +55,20 @@ const getSupabaseClient = () => {
 
 const mapPlan = (plan: Partial<PlanSuscripcion>): PlanSuscripcion => {
   const fallback = PLANES_REFERENCIA.find((item) => item.id === plan.id)
+  const nombre = String(plan.nombre ?? fallback?.nombre ?? '').toLowerCase()
+  const limiteCartasOriginal = Number(plan.limite_cartas ?? fallback?.limite_cartas ?? 0)
+  const precioOriginal = String(plan.precio ?? fallback?.precio ?? '0')
+
+  const limiteCartasNormalizado =
+    nombre === 'pro' ? 9999 : nombre === 'gratis' ? 10 : limiteCartasOriginal
+
+  const precioNormalizado = nombre === 'pro' ? '50' : nombre === 'gratis' ? '0' : precioOriginal
 
   return {
     id: String(plan.id ?? fallback?.id ?? ''),
-    nombre: String(plan.nombre ?? fallback?.nombre ?? ''),
-    limite_cartas: Number(plan.limite_cartas ?? fallback?.limite_cartas ?? 0),
-    precio: String(plan.precio ?? fallback?.precio ?? '0'),
+    nombre,
+    limite_cartas: limiteCartasNormalizado,
+    precio: precioNormalizado,
     activo: typeof plan.activo === 'boolean' ? plan.activo : (fallback?.activo ?? true),
   }
 }

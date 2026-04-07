@@ -1,7 +1,16 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { Check, Sparkles, Zap } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import {
+    AlertCircle,
+    Check,
+    CheckCircle2,
+    CreditCard,
+    Loader2,
+    Sparkles,
+    Zap,
+} from 'lucide-react'
 import { supabase } from '@/lib/supabaseClient'
 import {
     guardarSuscripcion,
@@ -12,6 +21,29 @@ import {
 
 type EstadoCarga = 'idle' | 'loading' | 'ready' | 'error'
 
+type WalletBrick = {
+    unmount: () => void
+}
+
+type BricksBuilder = {
+    create: (
+        brickType: string,
+        containerId: string,
+        settings: {
+            initialization: { preferenceId: string }
+            customization?: Record<string, unknown>
+        }
+    ) => Promise<WalletBrick>
+}
+
+declare global {
+    interface Window {
+        MercadoPago?: new (publicKey: string, options?: { locale?: string }) => {
+            bricks: () => BricksBuilder
+        }
+    }
+}
+
 const formatearPrecio = (precio: string) => {
     const valor = Number(precio)
 
@@ -19,7 +51,7 @@ const formatearPrecio = (precio: string) => {
         return 'Gratis'
     }
 
-    return `S/ ${valor.toFixed(2)}`
+    return `$${valor.toFixed(2)} MXN`
 }
 
 const formatearLimite = (limite: number) => {
@@ -56,19 +88,41 @@ const beneficiosPlan = (plan: PlanSuscripcion) => {
         `${formatearLimite(plan.limite_cartas)}`,
         'Plantillas basicas',
         'Exportar en TXT',
-        'Exportar en PDF y DOCX',
         'Soporte por email',
     ]
 }
 
 export default function SuscripcionPage() {
+    const searchParams = useSearchParams()
     const [estado, setEstado] = useState<EstadoCarga>('idle')
     const [usuarioId, setUsuarioId] = useState<string>('')
     const [planes, setPlanes] = useState<PlanSuscripcion[]>([])
     const [planActualId, setPlanActualId] = useState<string | null>(null)
     const [guardandoPlanId, setGuardandoPlanId] = useState<string | null>(null)
+    const [creandoCheckout, setCreandoCheckout] = useState<boolean>(false)
+    const [confirmandoPago, setConfirmandoPago] = useState<boolean>(false)
+    const [sdkListo, setSdkListo] = useState<boolean>(false)
+    const [preferenceId, setPreferenceId] = useState<string>('')
     const [mensaje, setMensaje] = useState<string>('')
     const [error, setError] = useState<string>('')
+
+    const mpPublicKey =
+        process.env.NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY ??
+        process.env.NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY ??
+        ''
+    const bricksBuilderRef = useRef<BricksBuilder | null>(null)
+    const walletBrickRef = useRef<WalletBrick | null>(null)
+    const sincronizacionInicialHechaRef = useRef<boolean>(false)
+
+    const cargarSuscripcionData = async (idUsuario: string) => {
+        const [planesData, suscripcionActual] = await Promise.all([
+            obtenerPlanesDisponibles(),
+            obtenerSuscripcion(idUsuario),
+        ])
+
+        setPlanes(planesData)
+        setPlanActualId(suscripcionActual?.plan_id ?? null)
+    }
 
     useEffect(() => {
         const cargarSuscripcion = async () => {
@@ -90,14 +144,7 @@ export default function SuscripcionPage() {
                 if (!user?.id) throw new Error('Usuario no autenticado')
 
                 setUsuarioId(user.id)
-
-                const [planesData, suscripcionActual] = await Promise.all([
-                    obtenerPlanesDisponibles(),
-                    obtenerSuscripcion(user.id),
-                ])
-
-                setPlanes(planesData)
-                setPlanActualId(suscripcionActual?.plan_id ?? null)
+                await cargarSuscripcionData(user.id)
                 setEstado('ready')
             } catch (e) {
                 const detalle = e instanceof Error ? e.message : 'No se pudo cargar el modulo de suscripcion.'
@@ -108,6 +155,153 @@ export default function SuscripcionPage() {
 
         void cargarSuscripcion()
     }, [])
+
+    useEffect(() => {
+        if (!mpPublicKey) return
+
+        const iniciarSDK = () => {
+            if (!window.MercadoPago) return
+
+            const mercadoPago = new window.MercadoPago(mpPublicKey, { locale: 'es-MX' })
+            bricksBuilderRef.current = mercadoPago.bricks()
+            setSdkListo(true)
+        }
+
+        if (window.MercadoPago) {
+            iniciarSDK()
+            return
+        }
+
+        const script = document.createElement('script')
+        script.src = 'https://sdk.mercadopago.com/js/v2'
+        script.async = true
+        script.onload = iniciarSDK
+        script.onerror = () => setError('No se pudo cargar el SDK de MercadoPago.')
+        document.body.appendChild(script)
+
+        return () => {
+            script.onload = null
+            script.onerror = null
+        }
+    }, [mpPublicKey])
+
+    useEffect(() => {
+        const paymentStatus = searchParams.get('payment_status')
+        const paymentId = searchParams.get('payment_id') ?? searchParams.get('collection_id')
+
+        if (!paymentStatus) return
+
+        if (paymentStatus === 'success') {
+            setMensaje('Pago recibido. Tu suscripcion se actualizara automaticamente en unos segundos. ✅')
+        }
+
+        if (paymentStatus === 'pending') {
+            setMensaje('Tu pago esta pendiente. Te avisaremos cuando sea confirmado.')
+        }
+
+        if (paymentStatus === 'failure') {
+            setError('El pago no pudo completarse. Puedes intentarlo de nuevo.')
+        }
+
+        if ((paymentStatus === 'success' || paymentStatus === 'pending') && usuarioId) {
+            void confirmarPagoDesdeUI(false, paymentId ?? undefined)
+        }
+    }, [searchParams, usuarioId])
+
+    const confirmarPagoDesdeUI = async (silencioso = false, paymentId?: string) => {
+        if (!usuarioId) return
+
+        try {
+            setConfirmandoPago(true)
+            setError('')
+
+            const paymentIdNormalizado = paymentId?.trim()
+            const payload = paymentIdNormalizado ? { usuarioId, paymentId: paymentIdNormalizado } : { usuarioId }
+
+            const response = await fetch('/api/confirmar-suscripcion', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            })
+
+            const data = (await response.json()) as {
+                ok?: boolean
+                estado?: string
+                error?: string
+                paymentId?: number | null
+            }
+
+            if (!response.ok || !data.ok) {
+                if (data.estado === 'sin_pagos') {
+                    throw new Error(
+                        'No se encontraron pagos para este usuario. Usa "Confirmar con ID de operacion" y pega el numero de operacion de MercadoPago.'
+                    )
+                }
+
+                throw new Error(data.error ?? 'No se pudo confirmar el estado del pago.')
+            }
+
+            await cargarSuscripcionData(usuarioId)
+
+            if (silencioso && data.estado !== 'activo') {
+                return
+            }
+
+            if (data.estado === 'activo') {
+                setMensaje('Suscripcion Pro activada correctamente ')
+            } else if (data.estado === 'pendiente') {
+                setMensaje('El pago aun esta pendiente de confirmacion.')
+            } else {
+                setMensaje('El ultimo pago no fue aprobado. Puedes volver a intentarlo.')
+            }
+        } catch (e) {
+            const detalle = e instanceof Error ? e.message : 'No se pudo confirmar el pago.'
+            setError(detalle)
+        } finally {
+            setConfirmandoPago(false)
+        }
+    }
+
+    useEffect(() => {
+        if (!usuarioId || sincronizacionInicialHechaRef.current) return
+
+        sincronizacionInicialHechaRef.current = true
+        void confirmarPagoDesdeUI(true)
+    }, [usuarioId])
+
+    useEffect(() => {
+        const renderWalletBrick = async () => {
+            if (!preferenceId || !sdkListo || !bricksBuilderRef.current) return
+
+            if (walletBrickRef.current) {
+                walletBrickRef.current.unmount()
+                walletBrickRef.current = null
+            }
+
+            try {
+                walletBrickRef.current = await bricksBuilderRef.current.create(
+                    'wallet',
+                    'walletBrick_container',
+                    {
+                        initialization: { preferenceId },
+                    }
+                )
+            } catch {
+                setError('No se pudo iniciar Checkout Bricks.')
+            }
+        }
+
+        void renderWalletBrick()
+
+        return () => {
+            if (walletBrickRef.current) {
+                walletBrickRef.current.unmount()
+                walletBrickRef.current = null
+            }
+        }
+    }, [preferenceId, sdkListo])
 
     const planActual = useMemo(() => {
         return planes.find((plan) => plan.id === planActualId) ?? null
@@ -128,6 +322,39 @@ export default function SuscripcionPage() {
             setGuardandoPlanId(plan.id)
             setError('')
             setMensaje('')
+            setPreferenceId('')
+
+            if (esPlanPago(plan)) {
+                if (!mpPublicKey) {
+                    throw new Error('Falta NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY en .env.local')
+                }
+
+                setCreandoCheckout(true)
+
+                const response = await fetch('/api/crear-suscripcion', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        usuarioId,
+                        planId: plan.id,
+                    }),
+                })
+
+                const data = (await response.json()) as {
+                    preferenceId?: string
+                    error?: string
+                }
+
+                if (!response.ok || !data.preferenceId) {
+                    throw new Error(data.error ?? 'No se pudo crear la sesion de checkout.')
+                }
+
+                setPreferenceId(data.preferenceId)
+                setMensaje('Continua el pago en MercadoPago para activar tu plan Pro.')
+                return
+            }
 
             const suscripcion = await guardarSuscripcion({
                 usuario_id: usuarioId,
@@ -135,19 +362,27 @@ export default function SuscripcionPage() {
             })
 
             setPlanActualId(suscripcion.plan_id)
-            setMensaje('Suscripcion actualizada')
+            setMensaje('Suscripcion actualizada ')
         } catch (e) {
             const detalle = e instanceof Error ? e.message : 'No se pudo actualizar la suscripcion.'
             setError(detalle)
         } finally {
+            setCreandoCheckout(false)
             setGuardandoPlanId(null)
+
+            if (usuarioId) {
+                await cargarSuscripcionData(usuarioId)
+            }
         }
     }
 
     if (estado === 'loading' || estado === 'idle') {
         return (
             <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                <p className="text-sm text-slate-600 dark:text-slate-300">Cargando planes y suscripcion...</p>
+                <div className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Cargando planes y suscripcion...
+                </div>
             </section>
         )
     }
@@ -162,7 +397,7 @@ export default function SuscripcionPage() {
                     <p className="text-xs font-semibold tracking-[0.22em] text-cyan-700 uppercase dark:text-cyan-300">SUSCRIPCION</p>
                     <h1 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">Elige el plan ideal para tu equipo</h1>
                     <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
-                        Cambia de plan cuando quieras y mantén control total de límites, costos y beneficios.
+                        Cambia de plan cuando quieras y manten control total de limites, costos y beneficios.
                     </p>
 
                     {planActual ? (
@@ -175,11 +410,19 @@ export default function SuscripcionPage() {
                             <span className="text-slate-500 dark:text-slate-400">{formatearLimite(planActual.limite_cartas)}</span>
                         </div>
                     ) : null}
+
+                    {confirmandoPago ? (
+                        <p className="mt-4 inline-flex items-center gap-2 rounded-xl border border-cyan-300 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:text-cyan-200">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Validando pago y sincronizando tu plan...
+                        </p>
+                    ) : null}
                 </div>
             </header>
 
             {estado === 'error' ? (
-                <article className="rounded-2xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-400/50 dark:bg-rose-500/10 dark:text-rose-100">
+                <article className="inline-flex items-center gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/50 dark:bg-rose-500/10 dark:text-rose-100">
+                    <AlertCircle className="h-4 w-4" />
                     {error}
                 </article>
             ) : null}
@@ -251,22 +494,56 @@ export default function SuscripcionPage() {
                                     : actual
                                         ? 'Plan actual'
                                         : cargandoEstePlan
-                                            ? 'Guardando...'
-                                            : 'Seleccionar plan'}
+                                            ? planPago && creandoCheckout
+                                                ? 'Preparando checkout...'
+                                                : 'Guardando...'
+                                            : planPago
+                                                ? 'Comprar Pro'
+                                                : 'Seleccionar plan'}
                             </button>
                         </article>
                     )
                 })}
             </div>
 
+            {preferenceId ? (
+                <section className="rounded-3xl border border-indigo-200 bg-indigo-50/70 p-6 shadow-sm dark:border-indigo-500/30 dark:bg-indigo-500/10">
+                    <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Checkout seguro de MercadoPago</h3>
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                        Completa el pago en sandbox. Al aprobarse, el webhook actualizara tu suscripcion automaticamente.
+                    </p>
+                    <div id="walletBrick_container" className="mt-4 min-h-14" />
+
+                    <p className="mt-4 text-xs text-slate-500 dark:text-slate-300">
+                        El cambio de plan se valida automaticamente despues de completar el pago.
+                    </p>
+                </section>
+            ) : null}
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-900">
+                <div className="flex items-start gap-3">
+                    <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300">
+                        <CreditCard className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Pagos proximamente</h3>
+                        <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                            Ya se integra Checkout Bricks en sandbox. El siguiente paso sera activar renovacion automatica y portal de facturas.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
             <div className="min-h-8">
                 {mensaje ? (
-                    <p className="inline-flex rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-300">
+                    <p className="inline-flex items-center gap-1.5 rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-300">
+                        <CheckCircle2 className="h-4 w-4" />
                         {mensaje}
                     </p>
                 ) : null}
                 {!mensaje && error ? (
-                    <p className="inline-flex rounded-full border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-300">
+                    <p className="inline-flex items-center gap-1.5 rounded-full border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 dark:border-red-500/50 dark:bg-red-500/10 dark:text-red-300">
+                        <AlertCircle className="h-4 w-4" />
                         {error}
                     </p>
                 ) : null}
