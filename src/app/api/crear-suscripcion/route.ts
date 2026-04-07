@@ -93,17 +93,6 @@ export async function POST(request: Request) {
       external_reference: usuarioId,
     }
 
-    if (expectedMode === 'test') {
-      Object.assign(preferencePayload, {
-        payment_methods: {
-          excluded_payment_types: [
-            { id: 'credit_card' },
-            { id: 'debit_card' },
-          ],
-        },
-      })
-    }
-
     if (usarHttpsPublica) {
       Object.assign(preferencePayload, {
         back_urls: {
