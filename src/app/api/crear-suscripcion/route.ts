@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { obtenerUsuarioAutenticadoDesdeRequest } from '@/lib/serverAuth'
 import { getBaseUrl } from '@/lib/getBaseUrl'
+import { getMercadoPagoPublicKeyMode, resolveMercadoPagoAccessToken } from '@/lib/mercadopagoEnv'
 
 type CrearSuscripcionBody = {
   planId?: string
@@ -15,8 +16,9 @@ export async function POST(request: Request) {
   try {
     const user = await obtenerUsuarioAutenticadoDesdeRequest(request)
 
-    const accessToken =
-      process.env.MERCADOPAGO_ACCESS_TOKEN ?? process.env.MERCADO_PAGO_ACCESS_TOKEN
+    const expectedMode = getMercadoPagoPublicKeyMode()
+    const resolvedToken = resolveMercadoPagoAccessToken(expectedMode)
+    const accessToken = resolvedToken?.token
 
     if (!accessToken) {
       return NextResponse.json(
@@ -25,11 +27,19 @@ export async function POST(request: Request) {
       )
     }
 
-    const mpMode = accessToken.startsWith('APP_USR-')
-      ? 'live'
-      : accessToken.startsWith('TEST-')
-        ? 'test'
-        : 'unknown'
+    const mpMode = resolvedToken?.mode ?? 'unknown'
+
+    if (expectedMode !== 'unknown' && expectedMode !== mpMode) {
+      return NextResponse.json(
+        {
+          error: `Credenciales de MercadoPago desalineadas. Public key: ${expectedMode}, access token: ${mpMode}.`,
+          mpMode,
+          expectedMode,
+          accessTokenSource: resolvedToken?.source ?? 'unknown',
+        },
+        { status: 500 }
+      )
+    }
 
     const body = (await request.json()) as CrearSuscripcionBody
     const usuarioId = user.id
@@ -122,6 +132,7 @@ export async function POST(request: Request) {
       initPoint: data.init_point ?? null,
       sandboxInitPoint: data.sandbox_init_point ?? null,
       mpMode,
+      accessTokenSource: resolvedToken?.source ?? 'unknown',
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error inesperado al crear suscripcion.'

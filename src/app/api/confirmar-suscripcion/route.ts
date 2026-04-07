@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { obtenerUsuarioAutenticadoDesdeRequest } from '@/lib/serverAuth'
+import { getMercadoPagoPublicKeyMode, resolveMercadoPagoAccessToken } from '@/lib/mercadopagoEnv'
 
 type ConfirmarBody = {
   paymentId?: string
@@ -15,7 +16,9 @@ export async function POST(request: Request) {
   try {
     const user = await obtenerUsuarioAutenticadoDesdeRequest(request)
 
-    const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN ?? process.env.MERCADO_PAGO_ACCESS_TOKEN
+    const expectedMode = getMercadoPagoPublicKeyMode()
+    const resolvedToken = resolveMercadoPagoAccessToken(expectedMode)
+    const accessToken = resolvedToken?.token
 
     if (!accessToken) {
       return NextResponse.json(

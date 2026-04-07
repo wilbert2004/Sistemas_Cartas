@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { activarPlanProPorPagoAprobado } from '@/services/backend/suscripciones-admin.service'
+import { getMercadoPagoPublicKeyMode, resolveMercadoPagoAccessToken } from '@/lib/mercadopagoEnv'
 
 const parseSignatureHeader = (raw: string) => {
   const pairs = raw
@@ -61,8 +62,9 @@ const validarFirmaWebhookMercadoPago = (request: Request, paymentId: string) => 
 }
 
 const procesarEventoPago = async (paymentId: string) => {
-  const accessToken =
-    process.env.MERCADOPAGO_ACCESS_TOKEN ?? process.env.MERCADO_PAGO_ACCESS_TOKEN
+  const expectedMode = getMercadoPagoPublicKeyMode()
+  const resolvedToken = resolveMercadoPagoAccessToken(expectedMode)
+  const accessToken = resolvedToken?.token
 
   if (!accessToken) {
     throw new Error('Falta configurar MERCADOPAGO_ACCESS_TOKEN.')
