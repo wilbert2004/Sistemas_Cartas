@@ -55,29 +55,61 @@ const normalizarLimiteCartas = (raw: unknown): number => {
 
 const obtenerLimiteCartasUsuario = async (usuarioId: string) => {
   const client = getSupabaseClient()
+  const {
+    data: { session },
+    error: sesionError,
+  } = await client.auth.getSession()
 
-  const { data, error } = await client
-    .from('suscripciones')
-    .select(
-      `
-        *,
-        planes (limite_cartas)
-      `
-    )
-    .eq('usuario_id', usuarioId)
-    .eq('estado', 'activo')
-    .single()
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      throw new Error('No se encontro una suscripcion activa para el usuario.')
-    }
-
-    throw error
+  if (sesionError) {
+    throw sesionError
   }
 
-  const relacionPlan = Array.isArray(data?.planes) ? data.planes[0] : data?.planes
-  return normalizarLimiteCartas(relacionPlan?.limite_cartas)
+  const token = session?.access_token
+
+  if (!token) {
+    throw new Error('No hay sesion activa para validar la suscripcion.')
+  }
+
+  const response = await fetch('/api/suscripcion/estado', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    cache: 'no-store',
+  })
+
+  const payload = (await response.json()) as {
+    ok?: boolean
+    error?: string
+    suscripcion?: {
+      usuario_id?: string
+      estado?: string | null
+      plan?: {
+        limite_cartas?: number | string | null
+      } | null
+    } | null
+  }
+
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error ?? 'No se pudo validar la suscripcion vigente.')
+  }
+
+  const suscripcion = payload.suscripcion
+
+  if (!suscripcion || !suscripcion.plan) {
+    throw new Error('No se encontro una suscripcion valida para el usuario.')
+  }
+
+  if (suscripcion.usuario_id && suscripcion.usuario_id !== usuarioId) {
+    throw new Error('La sesion no coincide con el usuario autenticado.')
+  }
+
+  if (suscripcion.estado !== 'activo' && suscripcion.plan.limite_cartas !== undefined) {
+    return normalizarLimiteCartas(suscripcion.plan.limite_cartas)
+  }
+
+  return normalizarLimiteCartas(suscripcion.plan.limite_cartas)
 }
 
 const validarLimiteCartasUsuario = async (usuarioId: string) => {

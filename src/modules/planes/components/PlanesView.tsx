@@ -39,7 +39,7 @@ export default function PlanesView() {
                     Mejorar a Pro
                 </h1>
                 <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                    Elige el plan que mejor se adapte a tu ritmo de generacion de cartas.
+                    El plan Pro se activa solo mediante pago confirmado y webhook seguro.
                 </p>
             </header>
 
@@ -72,8 +72,8 @@ export default function PlanesView() {
                             <article
                                 key={plan.id}
                                 className={`rounded-2xl border p-6 shadow-sm transition ${esPro
-                                        ? 'border-cyan-300 bg-cyan-50/60 ring-1 ring-cyan-200 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:ring-cyan-500/20'
-                                        : 'border-slate-200/80 bg-white dark:border-slate-800 dark:bg-slate-900'
+                                    ? 'border-cyan-300 bg-cyan-50/60 ring-1 ring-cyan-200 dark:border-cyan-500/40 dark:bg-cyan-500/10 dark:ring-cyan-500/20'
+                                    : 'border-slate-200/80 bg-white dark:border-slate-800 dark:bg-slate-900'
                                     }`}
                             >
                                 {esPro ? (
@@ -99,7 +99,7 @@ export default function PlanesView() {
                                         ? 'Plan actual'
                                         : actualizando
                                             ? 'Actualizando...'
-                                            : 'Elegir plan'}
+                                            : 'Ver opciones'}
                                 </button>
                             </article>
                         )

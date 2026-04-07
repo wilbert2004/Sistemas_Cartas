@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  actualizarPlanSuscripcion,
   obtenerPlanesDisponibles,
-  obtenerSuscripcionActiva,
+  obtenerSuscripcionSegura,
   obtenerUsuarioAutenticado,
 } from '@/modules/planes/services/planes.service'
 import type { Plan, UsePlanesReturn } from '@/modules/planes/types/planes.types'
@@ -27,7 +26,7 @@ export const usePlanes = (): UsePlanesReturn => {
 
         const [planesData, suscripcionActiva] = await Promise.all([
           obtenerPlanesDisponibles(),
-          obtenerSuscripcionActiva(user.id),
+          obtenerSuscripcionSegura(),
         ])
 
         setPlanes(planesData)
@@ -63,9 +62,14 @@ export const usePlanes = (): UsePlanesReturn => {
     setActualizandoPlanId(planId)
 
     try {
-      const suscripcion = await actualizarPlanSuscripcion(usuarioId, planId)
-      setPlanActualId(suscripcion.plan_id)
-      setSuccess('Plan actualizado correctamente')
+      const plan = planes.find((item) => item.id === planId)
+      const esPro = (plan?.nombre ?? '').toLowerCase().includes('pro')
+
+      if (esPro) {
+        setSuccess('Para cambiar a Pro usa el checkout seguro en el modulo de Suscripcion.')
+      } else {
+        setSuccess('El plan gratis se asigna automaticamente por backend al expirar.')
+      }
     } catch (err: unknown) {
       const mensaje =
         err instanceof Error ? err.message : 'No se pudo actualizar el plan de suscripcion.'
