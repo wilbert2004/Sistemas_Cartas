@@ -153,6 +153,7 @@ export default function SuscripcionPage() {
     const [sdkListo, setSdkListo] = useState<boolean>(false)
     const [preferenceId, setPreferenceId] = useState<string>('')
     const [checkoutUrl, setCheckoutUrl] = useState<string>('')
+    const [checkoutSandboxUrl, setCheckoutSandboxUrl] = useState<string>('')
     const [mensaje, setMensaje] = useState<string>('')
     const [error, setError] = useState<string>('')
 
@@ -378,6 +379,39 @@ export default function SuscripcionPage() {
         }
     }, [confirmarPagoDesdeUI, searchParams, usuarioId])
 
+    const activarProPruebaDirecta = useCallback(async () => {
+        try {
+            setError('')
+            const token = await obtenerTokenSesion()
+            const response = await fetch('/api/suscripcion/activar-pro-prueba', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+            })
+
+            const data = (await response.json()) as {
+                ok?: boolean
+                estado?: string
+                error?: string
+            }
+
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error ?? 'No se pudo activar Pro en modo prueba.')
+            }
+
+            setMensaje('Suscripcion Pro activada en modo TEST sin pasar por tarjeta.')
+            setPreferenceId('')
+            setCheckoutUrl('')
+            setCheckoutSandboxUrl('')
+            await cargarSuscripcionData()
+        } catch (e) {
+            const detalle = e instanceof Error ? e.message : 'No se pudo activar Pro en modo prueba.'
+            setError(detalle)
+        }
+    }, [cargarSuscripcionData, obtenerTokenSesion])
+
     useEffect(() => {
         if (!usuarioId || sincronizacionInicialHechaRef.current) return
 
@@ -459,36 +493,11 @@ export default function SuscripcionPage() {
             setError('')
             setMensaje('')
             setPreferenceId('')
+            setCheckoutSandboxUrl('')
 
             if (esPlanPago(plan)) {
                 if (!mpPublicKeyLimpia) {
                     throw new Error('Falta NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY en .env.local')
-                }
-
-                if (modoPublicKey === 'test') {
-                    const token = await obtenerTokenSesion()
-                    const response = await fetch('/api/suscripcion/activar-pro-prueba', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                        },
-                    })
-
-                    const data = (await response.json()) as {
-                        ok?: boolean
-                        estado?: string
-                        error?: string
-                    }
-
-                    if (!response.ok || !data.ok) {
-                        throw new Error(data.error ?? 'No se pudo activar el plan Pro en modo prueba.')
-                    }
-
-                    setPreferenceId('')
-                    setCheckoutUrl('')
-                    setMensaje('Suscripcion Pro activada en modo TEST sin pasar por tarjeta.')
-                    return
                 }
 
                 setCreandoCheckout(true)
@@ -549,10 +558,14 @@ export default function SuscripcionPage() {
                     )
                 }
 
-                const urlCheckout = data.initPoint ?? data.sandboxInitPoint ?? ''
+                const urlCheckout =
+                    modoPublicKey === 'test'
+                        ? (data.sandboxInitPoint ?? data.initPoint ?? '')
+                        : (data.initPoint ?? data.sandboxInitPoint ?? '')
 
                 setPreferenceId(data.preferenceId)
                 setCheckoutUrl(urlCheckout)
+                setCheckoutSandboxUrl(data.sandboxInitPoint ?? '')
                 setMensaje('Continua el pago en MercadoPago para activar tu plan Pro.')
                 return
             }
@@ -720,9 +733,24 @@ export default function SuscripcionPage() {
                         </a>
                     ) : null}
 
+                    {modoPublicKey === 'test' ? (
+                        <button
+                            type="button"
+                            onClick={() => void activarProPruebaDirecta()}
+                            className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-indigo-300 bg-white px-4 py-3 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 dark:border-indigo-400/40 dark:bg-slate-900 dark:text-indigo-200 dark:hover:bg-slate-800"
+                        >
+                            Activar Pro de prueba sin checkout
+                        </button>
+                    ) : null}
+
                     <p className="mt-4 text-xs text-slate-500 dark:text-slate-300">
                         Si el Brick no aparece, usa el boton directo para continuar el pago.
                     </p>
+                    {modoPublicKey === 'test' && checkoutSandboxUrl ? (
+                        <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                            Modo TEST: se prioriza la URL sandbox de MercadoPago.
+                        </p>
+                    ) : null}
                 </section>
             ) : null}
 
