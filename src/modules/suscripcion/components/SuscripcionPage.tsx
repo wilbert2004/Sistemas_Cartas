@@ -523,10 +523,7 @@ export default function SuscripcionPage() {
                     )
                 }
 
-                const urlCheckout =
-                    modoPublicKey === 'test'
-                        ? (data.sandboxInitPoint ?? data.initPoint ?? '')
-                        : (data.initPoint ?? data.sandboxInitPoint ?? '')
+                const urlCheckout = data.initPoint ?? data.sandboxInitPoint ?? ''
 
                 setPreferenceId(data.preferenceId)
                 setCheckoutUrl(urlCheckout)
