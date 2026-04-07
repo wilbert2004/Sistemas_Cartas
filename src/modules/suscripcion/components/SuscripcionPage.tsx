@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
     AlertCircle,
@@ -109,11 +109,17 @@ export default function SuscripcionPage() {
         process.env.NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY ??
         process.env.NEXT_PUBLIC_MERCADO_PAGO_PUBLIC_KEY ??
         ''
+    const mpPublicKeyLimpia = mpPublicKey.trim()
+    const modoPublicKey = mpPublicKeyLimpia.startsWith('APP_USR-')
+        ? 'live'
+        : mpPublicKeyLimpia.startsWith('TEST-')
+            ? 'test'
+            : 'unknown'
     const bricksBuilderRef = useRef<BricksBuilder | null>(null)
     const walletBrickRef = useRef<WalletBrick | null>(null)
     const sincronizacionInicialHechaRef = useRef<boolean>(false)
 
-    const obtenerTokenSesion = async () => {
+    const obtenerTokenSesion = useCallback(async () => {
         if (!supabase) {
             throw new Error('No se pudo inicializar Supabase para obtener sesion.')
         }
@@ -132,9 +138,9 @@ export default function SuscripcionPage() {
         }
 
         return session.access_token
-    }
+    }, [])
 
-    const cargarSuscripcionData = async () => {
+    const cargarSuscripcionData = useCallback(async () => {
         const [planesData, suscripcionActual] = await Promise.all([
             obtenerPlanesDisponibles(),
             obtenerEstadoSuscripcionSeguro(),
@@ -142,7 +148,7 @@ export default function SuscripcionPage() {
 
         setPlanes(planesData)
         setPlanActualId(suscripcionActual?.plan_id ?? null)
-    }
+    }, [])
 
     useEffect(() => {
         const cargarSuscripcion = async () => {
@@ -174,17 +180,35 @@ export default function SuscripcionPage() {
         }
 
         void cargarSuscripcion()
-    }, [])
+    }, [cargarSuscripcionData])
 
     useEffect(() => {
-        if (!mpPublicKey) return
+        const keyPreview = mpPublicKeyLimpia ? `${mpPublicKeyLimpia.slice(0, 12)}...` : '(vacia)'
+        console.log('MP PUBLIC KEY:', keyPreview)
+
+        if (!mpPublicKeyLimpia) {
+            setError('Falta NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY en el entorno actual.')
+            return
+        }
 
         const iniciarSDK = () => {
-            if (!window.MercadoPago) return
+            try {
+                if (!window.MercadoPago) {
+                    throw new Error('window.MercadoPago no esta disponible despues de cargar el SDK.')
+                }
 
-            const mercadoPago = new window.MercadoPago(mpPublicKey, { locale: 'es-MX' })
-            bricksBuilderRef.current = mercadoPago.bricks()
-            setSdkListo(true)
+                const mercadoPago = new window.MercadoPago(mpPublicKeyLimpia, { locale: 'es-MX' })
+                bricksBuilderRef.current = mercadoPago.bricks()
+                setSdkListo(true)
+                console.log('MercadoPago SDK inicializado. Modo key:', modoPublicKey)
+            } catch (sdkError) {
+                const detalle =
+                    sdkError instanceof Error
+                        ? sdkError.message
+                        : 'Error desconocido inicializando MercadoPago SDK.'
+                setError(`No se pudo inicializar MercadoPago: ${detalle}`)
+                setSdkListo(false)
+            }
         }
 
         if (window.MercadoPago) {
@@ -192,43 +216,35 @@ export default function SuscripcionPage() {
             return
         }
 
+        const existing = document.getElementById('mercadopago-sdk-v2') as HTMLScriptElement | null
+
+        if (existing) {
+            if (window.MercadoPago) {
+                iniciarSDK()
+            } else {
+                existing.addEventListener('load', iniciarSDK, { once: true })
+            }
+            return
+        }
+
         const script = document.createElement('script')
+        script.id = 'mercadopago-sdk-v2'
         script.src = 'https://sdk.mercadopago.com/js/v2'
         script.async = true
         script.onload = iniciarSDK
-        script.onerror = () => setError('No se pudo cargar el SDK de MercadoPago.')
+        script.onerror = () => {
+            setError('No se pudo cargar el SDK de MercadoPago. Verifica red/CORS y la key publica.')
+            setSdkListo(false)
+        }
         document.body.appendChild(script)
 
         return () => {
             script.onload = null
             script.onerror = null
         }
-    }, [mpPublicKey])
+    }, [mpPublicKeyLimpia, modoPublicKey])
 
-    useEffect(() => {
-        const paymentStatus = searchParams.get('payment_status')
-        const paymentId = searchParams.get('payment_id') ?? searchParams.get('collection_id')
-
-        if (!paymentStatus) return
-
-        if (paymentStatus === 'success') {
-            setMensaje('Pago recibido. Tu suscripcion se actualizara automaticamente en unos segundos. ✅')
-        }
-
-        if (paymentStatus === 'pending') {
-            setMensaje('Tu pago esta pendiente. Te avisaremos cuando sea confirmado.')
-        }
-
-        if (paymentStatus === 'failure') {
-            setError('El pago no pudo completarse. Puedes intentarlo de nuevo.')
-        }
-
-        if ((paymentStatus === 'success' || paymentStatus === 'pending') && usuarioId) {
-            void confirmarPagoDesdeUI(false, paymentId ?? undefined)
-        }
-    }, [searchParams, usuarioId])
-
-    const confirmarPagoDesdeUI = async (silencioso = false, paymentId?: string) => {
+    const confirmarPagoDesdeUI = useCallback(async (silencioso = false, paymentId?: string) => {
         if (!usuarioId) return
 
         try {
@@ -284,18 +300,47 @@ export default function SuscripcionPage() {
         } finally {
             setConfirmandoPago(false)
         }
-    }
+    }, [cargarSuscripcionData, obtenerTokenSesion, usuarioId])
+
+    useEffect(() => {
+        const paymentStatus = searchParams.get('payment_status')
+        const paymentId = searchParams.get('payment_id') ?? searchParams.get('collection_id')
+
+        if (!paymentStatus) return
+
+        if (paymentStatus === 'success') {
+            setMensaje('Pago recibido. Tu suscripcion se actualizara automaticamente en unos segundos. ✅')
+        }
+
+        if (paymentStatus === 'pending') {
+            setMensaje('Tu pago esta pendiente. Te avisaremos cuando sea confirmado.')
+        }
+
+        if (paymentStatus === 'failure') {
+            setError('El pago no pudo completarse. Puedes intentarlo de nuevo.')
+        }
+
+        if ((paymentStatus === 'success' || paymentStatus === 'pending') && usuarioId) {
+            void confirmarPagoDesdeUI(false, paymentId ?? undefined)
+        }
+    }, [confirmarPagoDesdeUI, searchParams, usuarioId])
 
     useEffect(() => {
         if (!usuarioId || sincronizacionInicialHechaRef.current) return
 
         sincronizacionInicialHechaRef.current = true
         void confirmarPagoDesdeUI(true)
-    }, [usuarioId])
+    }, [confirmarPagoDesdeUI, usuarioId])
 
     useEffect(() => {
         const renderWalletBrick = async () => {
             if (!preferenceId || !sdkListo || !bricksBuilderRef.current) return
+
+            const container = document.getElementById('walletBrick_container')
+            if (!container) {
+                setError('No se encontro el contenedor del Brick de MercadoPago.')
+                return
+            }
 
             if (walletBrickRef.current) {
                 walletBrickRef.current.unmount()
@@ -310,8 +355,13 @@ export default function SuscripcionPage() {
                         initialization: { preferenceId },
                     }
                 )
-            } catch {
-                setError('No se pudo iniciar Checkout Bricks.')
+                console.log('Wallet Brick renderizado correctamente con preferenceId:', preferenceId)
+            } catch (brickError) {
+                const detalle =
+                    brickError instanceof Error
+                        ? brickError.message
+                        : 'Error desconocido renderizando Wallet Brick.'
+                setError(`No se pudo iniciar Checkout Bricks: ${detalle}`)
             }
         }
 
@@ -347,7 +397,7 @@ export default function SuscripcionPage() {
             setPreferenceId('')
 
             if (esPlanPago(plan)) {
-                if (!mpPublicKey) {
+                if (!mpPublicKeyLimpia) {
                     throw new Error('Falta NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY en .env.local')
                 }
 
@@ -368,10 +418,18 @@ export default function SuscripcionPage() {
                 const data = (await response.json()) as {
                     preferenceId?: string
                     error?: string
+                    mpMode?: 'live' | 'test' | 'unknown'
                 }
 
                 if (!response.ok || !data.preferenceId) {
                     throw new Error(data.error ?? 'No se pudo crear la sesion de checkout.')
+                }
+
+                const modoBackend = data.mpMode ?? 'unknown'
+                if (modoBackend !== 'unknown' && modoPublicKey !== 'unknown' && modoBackend !== modoPublicKey) {
+                    throw new Error(
+                        `Tus credenciales de MercadoPago no coinciden (frontend: ${modoPublicKey}, backend: ${modoBackend}).`
+                    )
                 }
 
                 setPreferenceId(data.preferenceId)

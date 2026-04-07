@@ -25,6 +25,12 @@ export async function POST(request: Request) {
       )
     }
 
+    const mpMode = accessToken.startsWith('APP_USR-')
+      ? 'live'
+      : accessToken.startsWith('TEST-')
+        ? 'test'
+        : 'unknown'
+
     const body = (await request.json()) as CrearSuscripcionBody
     const usuarioId = user.id
     const planId = body.planId?.trim()
@@ -115,6 +121,7 @@ export async function POST(request: Request) {
       preferenceId: data.id,
       initPoint: data.init_point ?? null,
       sandboxInitPoint: data.sandbox_init_point ?? null,
+      mpMode,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error inesperado al crear suscripcion.'
