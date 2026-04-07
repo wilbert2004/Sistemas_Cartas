@@ -152,6 +152,7 @@ export default function SuscripcionPage() {
     const [confirmandoPago, setConfirmandoPago] = useState<boolean>(false)
     const [sdkListo, setSdkListo] = useState<boolean>(false)
     const [preferenceId, setPreferenceId] = useState<string>('')
+    const [checkoutUrl, setCheckoutUrl] = useState<string>('')
     const [mensaje, setMensaje] = useState<string>('')
     const [error, setError] = useState<string>('')
 
@@ -411,6 +412,9 @@ export default function SuscripcionPage() {
                                 console.error('MercadoPago Wallet Brick onError:', sdkError)
                                 const detalle = extraerDetalleMercadoPago(sdkError)
                                 setError(`Checkout Bricks devolvio un error: ${detalle}`)
+                                if (checkoutUrl) {
+                                    setMensaje('Puedes continuar con el boton directo de MercadoPago mientras validamos el Brick.')
+                                }
                             },
                         },
                     }
@@ -431,7 +435,7 @@ export default function SuscripcionPage() {
                 walletBrickRef.current = null
             }
         }
-    }, [preferenceId, sdkListo])
+    }, [checkoutUrl, preferenceId, sdkListo])
 
     const planActual = useMemo(() => {
         return planes.find((plan) => plan.id === planActualId) ?? null
@@ -475,9 +479,20 @@ export default function SuscripcionPage() {
 
                 const data = (await response.json()) as {
                     preferenceId?: string
+                    initPoint?: string | null
+                    sandboxInitPoint?: string | null
                     error?: string
                     mpMode?: 'live' | 'test' | 'unknown'
+                    accessTokenSource?: string
                 }
+
+                console.log('Respuesta /api/crear-suscripcion:', {
+                    ok: response.ok,
+                    mpMode: data.mpMode,
+                    accessTokenSource: data.accessTokenSource,
+                    hasPreferenceId: Boolean(data.preferenceId),
+                    hasInitPoint: Boolean(data.initPoint),
+                })
 
                 if (!response.ok || !data.preferenceId) {
                     throw new Error(data.error ?? 'No se pudo crear la sesion de checkout.')
@@ -491,6 +506,7 @@ export default function SuscripcionPage() {
                 }
 
                 setPreferenceId(data.preferenceId)
+                setCheckoutUrl(data.initPoint ?? data.sandboxInitPoint ?? '')
                 setMensaje('Continua el pago en MercadoPago para activar tu plan Pro.')
                 return
             }
@@ -643,12 +659,23 @@ export default function SuscripcionPage() {
                 <section className="rounded-3xl border border-indigo-200 bg-indigo-50/70 p-6 shadow-sm dark:border-indigo-500/30 dark:bg-indigo-500/10">
                     <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Checkout seguro de MercadoPago</h3>
                     <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                        Completa el pago en sandbox. Al aprobarse, el webhook actualizara tu suscripcion automaticamente.
+                        Completa el pago y, al aprobarse, el webhook actualizara tu suscripcion automaticamente.
                     </p>
                     <div id="walletBrick_container" className="mt-4 min-h-14" />
 
+                    {checkoutUrl ? (
+                        <a
+                            href={checkoutUrl}
+                            target="_self"
+                            rel="noopener noreferrer"
+                            className="mt-4 inline-flex w-full items-center justify-center rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500"
+                        >
+                            Pagar directo en MercadoPago
+                        </a>
+                    ) : null}
+
                     <p className="mt-4 text-xs text-slate-500 dark:text-slate-300">
-                        El cambio de plan se valida automaticamente despues de completar el pago.
+                        Si el Brick no aparece, usa el boton directo para continuar el pago.
                     </p>
                 </section>
             ) : null}
