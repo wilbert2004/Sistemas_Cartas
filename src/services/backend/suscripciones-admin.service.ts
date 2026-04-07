@@ -181,19 +181,32 @@ export const activarPlanProPorPagoAprobado = async (usuarioId: string) => {
   const fechaInicio = new Date()
   const fechaFin = addMonths(fechaInicio, 2)
 
-  const { error } = await client.from('suscripciones').upsert(
-    {
-      usuario_id: usuarioId,
-      plan_id: planPro.id,
-      estado: 'activo',
-      fecha_inicio: fechaInicio.toISOString(),
-      fecha_fin: fechaFin.toISOString(),
-    },
-    { onConflict: 'usuario_id' }
-  )
+  const payload = {
+    usuario_id: usuarioId,
+    plan_id: planPro.id,
+    estado: 'activo',
+    fecha_inicio: fechaInicio.toISOString(),
+    fecha_fin: fechaFin.toISOString(),
+  }
 
-  if (error) {
-    throw new Error(`No se pudo activar plan Pro: ${error.message}`)
+  const { data: updatedRows, error: updateError } = await client
+    .from('suscripciones')
+    .update(payload)
+    .eq('usuario_id', usuarioId)
+    .select('usuario_id')
+
+  if (updateError) {
+    throw new Error(`No se pudo activar plan Pro (update): ${updateError.message}`)
+  }
+
+  if ((updatedRows?.length ?? 0) > 0) {
+    return
+  }
+
+  const { error: insertError } = await client.from('suscripciones').insert(payload)
+
+  if (insertError) {
+    throw new Error(`No se pudo activar plan Pro (insert): ${insertError.message}`)
   }
 }
 
