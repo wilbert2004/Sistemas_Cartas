@@ -521,8 +521,13 @@ export default function SuscripcionPage() {
                     )
                 }
 
+                const urlCheckout =
+                    modoPublicKey === 'test'
+                        ? (data.sandboxInitPoint ?? data.initPoint ?? '')
+                        : (data.initPoint ?? data.sandboxInitPoint ?? '')
+
                 setPreferenceId(data.preferenceId)
-                setCheckoutUrl(data.initPoint ?? data.sandboxInitPoint ?? '')
+                setCheckoutUrl(urlCheckout)
                 setMensaje('Continua el pago en MercadoPago para activar tu plan Pro.')
                 return
             }
