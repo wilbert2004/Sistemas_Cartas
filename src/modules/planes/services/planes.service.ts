@@ -55,39 +55,56 @@ export const obtenerSuscripcionActiva = async (
   return (data as Suscripcion | null) ?? null
 }
 
-export const actualizarPlanSuscripcion = async (usuarioId: string, planId: string) => {
+export const obtenerSuscripcionSegura = async (): Promise<Suscripcion | null> => {
   const client = getSupabaseClient()
 
-  const suscripcionActiva = await obtenerSuscripcionActiva(usuarioId)
+  const {
+    data: { session },
+    error: sesionError,
+  } = await client.auth.getSession()
 
-  if (suscripcionActiva) {
-    const { data, error } = await client
-      .from('suscripciones')
-      .update({
-        plan_id: planId,
-        estado: 'activo',
-      })
-      .eq('id', suscripcionActiva.id)
-      .select('id, usuario_id, plan_id, estado, fecha_inicio')
-      .single()
-
-    if (error) throw error
-
-    return data as Suscripcion
+  if (sesionError) {
+    throw sesionError
   }
 
-  const { data, error } = await client
-    .from('suscripciones')
-    .insert({
-      usuario_id: usuarioId,
-      plan_id: planId,
-      estado: 'activo',
-      fecha_inicio: new Date().toISOString(),
-    })
-    .select('id, usuario_id, plan_id, estado, fecha_inicio')
-    .single()
+  const token = session?.access_token
 
-  if (error) throw error
+  if (!token) {
+    throw new Error('No hay sesion activa para validar la suscripcion.')
+  }
 
-  return data as Suscripcion
+  const response = await fetch('/api/suscripcion/estado', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    cache: 'no-store',
+  })
+
+  const data = (await response.json()) as {
+    ok?: boolean
+    error?: string
+    suscripcion?: {
+      usuario_id?: string
+      plan_id?: string | null
+      estado?: string | null
+      fecha_inicio?: string | null
+    } | null
+  }
+
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error ?? 'No se pudo validar la suscripcion en backend.')
+  }
+
+  const suscripcion = data.suscripcion
+  if (!suscripcion) return null
+
+  return {
+    id: `${suscripcion.usuario_id ?? ''}:${suscripcion.plan_id ?? ''}`,
+    usuario_id: suscripcion.usuario_id ?? '',
+    plan_id: suscripcion.plan_id ?? '',
+    estado: suscripcion.estado ?? '',
+    fecha_inicio: suscripcion.fecha_inicio ?? '',
+  }
 }

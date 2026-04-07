@@ -64,62 +64,27 @@ const guardarUsuarioEnTabla = async (payload: {
   if (error) throw error
 }
 
-const obtenerIdPlanGratis = async () => {
-  const client = getSupabaseClient()
-
-  const { data, error } = await client
-    .from('planes')
-    .select('id, nombre')
-    .ilike('nombre', 'gratis')
-    .limit(1)
-
-  if (error) throw error
-
-  const planGratis = data?.[0]
-  if (!planGratis?.id) {
-    throw new Error('No se encontro el plan gratis en la tabla planes.')
+const inicializarSuscripcionGratisBackend = async (accessToken?: string | null) => {
+  if (!accessToken) {
+    return
   }
 
-  return String(planGratis.id)
-}
+  const response = await fetch('/api/suscripcion/inicializar', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  })
 
-const asegurarSuscripcionGratis = async (usuarioId: string) => {
-  const client = getSupabaseClient()
-
-  const { data: suscripcionExistente, error: consultaError } = await client
-    .from('suscripciones')
-    .select('id')
-    .eq('usuario_id', usuarioId)
-    .limit(1)
-
-  if (consultaError) throw consultaError
-
-  if ((suscripcionExistente?.length ?? 0) > 0) {
-    return suscripcionExistente[0]
+  const data = (await response.json().catch(() => ({}))) as {
+    ok?: boolean
+    error?: string
   }
 
-  const planGratisId = await obtenerIdPlanGratis()
-
-  const { data, error } = await client
-    .from('suscripciones')
-    .insert({
-      usuario_id: usuarioId,
-      plan_id: planGratisId,
-      estado: 'activo',
-      fecha_inicio: new Date().toISOString(),
-    })
-    .select()
-    .single()
-
-  // Si ocurre una carrera y otra operación crea la suscripción primero,
-  // se considera estado consistente y no se rompe el registro.
-  if (error?.code === '23505') {
-    return null
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error ?? 'No se pudo inicializar la suscripcion gratis en backend.')
   }
-
-  if (error) throw error
-
-  return data
 }
 
 const obtenerNombreDesdeMetadata = (user: User) => {
@@ -172,7 +137,14 @@ export const sincronizarUsuarioAutenticado = async (user?: User) => {
 
   if (error) throw error
 
-  await asegurarSuscripcionGratis(usuarioAuth.id)
+  const {
+    data: { session },
+    error: sesionError,
+  } = await client.auth.getSession()
+
+  if (sesionError) throw sesionError
+
+  await inicializarSuscripcionGratisBackend(session?.access_token)
 
   return payload
 }
@@ -220,7 +192,7 @@ export const registrarUsuario = async ({
     nombre,
   })
 
-  await asegurarSuscripcionGratis(userId)
+  await inicializarSuscripcionGratisBackend(data.session?.access_token)
 
   return data
 }
@@ -268,8 +240,12 @@ export const enviarCorreoRecuperacion = async (
 ) => {
   const client = getSupabaseClient()
 
+  const baseUrl = typeof window !== 'undefined'
+    ? window.location.origin
+    : process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'
+
   const { data, error } = await client.auth.resetPasswordForEmail(email, {
-    redirectTo: redirectTo ?? 'http://localhost:3000/update-password',
+    redirectTo: redirectTo ?? `${baseUrl}/update-password`,
   })
 
   if (error) throw error

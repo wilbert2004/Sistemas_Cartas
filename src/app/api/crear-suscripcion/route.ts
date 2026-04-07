@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
+import { obtenerUsuarioAutenticadoDesdeRequest } from '@/lib/serverAuth'
+import { getBaseUrl } from '@/lib/getBaseUrl'
 
 type CrearSuscripcionBody = {
-  usuarioId?: string
   planId?: string
 }
 
@@ -10,16 +11,10 @@ const PLAN_GRATIS_ID = 'f02a5d25-a431-48cf-aa34-f82a5ecf45f7'
 
 export const dynamic = 'force-dynamic'
 
-const getBaseUrl = (request: Request) => {
-  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL
-  if (fromEnv) return fromEnv
-
-  const url = new URL(request.url)
-  return `${url.protocol}//${url.host}`
-}
-
 export async function POST(request: Request) {
   try {
+    const user = await obtenerUsuarioAutenticadoDesdeRequest(request)
+
     const accessToken =
       process.env.MERCADOPAGO_ACCESS_TOKEN ?? process.env.MERCADO_PAGO_ACCESS_TOKEN
 
@@ -31,12 +26,12 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as CrearSuscripcionBody
-    const usuarioId = body.usuarioId?.trim()
+    const usuarioId = user.id
     const planId = body.planId?.trim()
 
-    if (!usuarioId || !planId) {
+    if (!planId) {
       return NextResponse.json(
-        { error: 'usuarioId y planId son requeridos.' },
+        { error: 'planId es requerido.' },
         { status: 400 }
       )
     }

@@ -1,71 +1,20 @@
 import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { obtenerUsuarioAutenticadoDesdeRequest } from '@/lib/serverAuth'
 
 type ConfirmarBody = {
-  usuarioId?: string
   paymentId?: string
 }
 
-type EstadoSuscripcion = 'activo' | 'pendiente' | 'cancelado'
-
-const PLAN_PRO_ID = '727b8e67-1e00-45c2-9aab-6a8652e7fc92'
-const PLAN_GRATIS_ID = 'f02a5d25-a431-48cf-aa34-f82a5ecf45f7'
-
-const mapearEstado = (estadoPago: string): EstadoSuscripcion => {
+const mapearEstadoPago = (estadoPago: string) => {
   if (estadoPago === 'approved') return 'activo'
   if (estadoPago === 'pending' || estadoPago === 'in_process') return 'pendiente'
   return 'cancelado'
 }
 
-const actualizarSuscripcion = async (params: {
-  usuarioId: string
-  planId: string
-  estado: EstadoSuscripcion
-}) => {
-  if (!supabaseAdmin) {
-    throw new Error('Falta SUPABASE_SERVICE_ROLE_KEY para confirmar la suscripcion.')
-  }
-
-  const { data: existente, error: consultaError } = await supabaseAdmin
-    .from('suscripciones')
-    .select('id')
-    .eq('usuario_id', params.usuarioId)
-    .limit(1)
-
-  if (consultaError) {
-    throw new Error(`No se pudo consultar suscripcion actual: ${consultaError.message}`)
-  }
-
-  if ((existente?.length ?? 0) > 0) {
-    const { error: updateError } = await supabaseAdmin
-      .from('suscripciones')
-      .update({
-        plan_id: params.planId,
-        estado: params.estado,
-      })
-      .eq('usuario_id', params.usuarioId)
-
-    if (updateError) {
-      throw new Error(`No se pudo actualizar suscripcion: ${updateError.message}`)
-    }
-
-    return
-  }
-
-  const { error: insertError } = await supabaseAdmin.from('suscripciones').insert({
-    usuario_id: params.usuarioId,
-    plan_id: params.planId,
-    estado: params.estado,
-    fecha_inicio: new Date().toISOString(),
-  })
-
-  if (insertError) {
-    throw new Error(`No se pudo crear suscripcion: ${insertError.message}`)
-  }
-}
-
 export async function POST(request: Request) {
   try {
+    const user = await obtenerUsuarioAutenticadoDesdeRequest(request)
+
     const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN ?? process.env.MERCADO_PAGO_ACCESS_TOKEN
 
     if (!accessToken) {
@@ -76,12 +25,9 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as ConfirmarBody
-    const usuarioId = body.usuarioId?.trim()
     const paymentIdDirecto = body.paymentId?.trim()
 
-    if (!usuarioId) {
-      return NextResponse.json({ error: 'usuarioId es requerido.' }, { status: 400 })
-    }
+    const usuarioId = user.id
 
     let pago: {
       id?: number
@@ -180,33 +126,16 @@ export async function POST(request: Request) {
       )
     }
 
-    const estado = mapearEstado(pago.status ?? 'cancelled')
-    const planIdMetadata =
-      typeof pago.metadata?.plan_id === 'string' ? String(pago.metadata.plan_id) : PLAN_PRO_ID
-    const planId = estado === 'activo' || estado === 'pendiente' ? planIdMetadata : PLAN_GRATIS_ID
-
-    // No degradamos automaticamente a plan gratis por pagos rechazados de pruebas.
-    // Si el usuario ya era Pro, conserva su plan hasta una accion explicita del negocio.
-    if (estado === 'cancelado') {
-      return NextResponse.json({
-        ok: true,
-        estado,
-        planId: null,
-        paymentId: pago.id ?? null,
-      })
-    }
-
-    await actualizarSuscripcion({
-      usuarioId,
-      planId,
-      estado,
-    })
+    const estado = mapearEstadoPago(pago.status ?? 'cancelled')
 
     return NextResponse.json({
       ok: true,
       estado,
-      planId,
       paymentId: pago.id ?? null,
+      message:
+        estado === 'activo'
+          ? 'Pago aprobado. La suscripcion se actualiza exclusivamente desde el webhook.'
+          : 'Pago aun no aprobado. La suscripcion no cambia desde este endpoint.',
     })
   } catch (error) {
     const message =

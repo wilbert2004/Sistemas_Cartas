@@ -13,12 +13,8 @@ export type SuscripcionConPlan = {
   plan_id: string | null
   estado: string | null
   fecha_inicio: string | null
+  fecha_fin: string | null
   plan: PlanSuscripcion | null
-}
-
-type GuardarSuscripcionInput = {
-  usuario_id: string
-  plan_id: string
 }
 
 type SuscripcionRow = {
@@ -26,6 +22,7 @@ type SuscripcionRow = {
   plan_id: string
   estado: string
   fecha_inicio: string
+  fecha_fin: string | null
 }
 
 export const PLANES_REFERENCIA: PlanSuscripcion[] = [
@@ -100,9 +97,8 @@ const obtenerSuscripcionRow = async (usuario_id: string): Promise<SuscripcionRow
 
   const { data, error } = await client
     .from('suscripciones')
-    .select('usuario_id, plan_id, estado, fecha_inicio')
+    .select('usuario_id, plan_id, estado, fecha_inicio, fecha_fin')
     .eq('usuario_id', usuario_id)
-    .eq('estado', 'activo')
     .maybeSingle()
 
   if (error) throw error
@@ -127,93 +123,47 @@ export const obtenerSuscripcion = async (usuario_id: string): Promise<Suscripcio
     plan_id: suscripcion.plan_id,
     estado: suscripcion.estado,
     fecha_inicio: suscripcion.fecha_inicio,
+    fecha_fin: suscripcion.fecha_fin,
     plan,
   }
 }
 
-const guardarSuscripcionConFallback = async (
-  input: GuardarSuscripcionInput
-): Promise<SuscripcionRow> => {
+export const obtenerEstadoSuscripcionSeguro = async (): Promise<SuscripcionConPlan | null> => {
   const client = getSupabaseClient()
 
-  const existente = await obtenerSuscripcionRow(input.usuario_id)
+  const {
+    data: { session },
+    error: sesionError,
+  } = await client.auth.getSession()
 
-  if (existente) {
-    const { data, error } = await client
-      .from('suscripciones')
-      .update({
-        plan_id: input.plan_id,
-        estado: 'activo',
-      })
-      .eq('usuario_id', input.usuario_id)
-      .select('usuario_id, plan_id, estado, fecha_inicio')
-      .single()
-
-    if (error) throw error
-
-    return data as SuscripcionRow
+  if (sesionError) {
+    throw sesionError
   }
 
-  const { data, error } = await client
-    .from('suscripciones')
-    .insert({
-      usuario_id: input.usuario_id,
-      plan_id: input.plan_id,
-      estado: 'activo',
-      fecha_inicio: new Date().toISOString(),
-    })
-    .select('usuario_id, plan_id, estado, fecha_inicio')
-    .single()
+  const token = session?.access_token
 
-  if (error) throw error
-
-  return data as SuscripcionRow
-}
-
-export const guardarSuscripcion = async (
-  input: GuardarSuscripcionInput
-): Promise<SuscripcionConPlan> => {
-  const planes = await obtenerPlanesDisponibles()
-  const planSeleccionado = planes.find((item) => item.id === input.plan_id)
-
-  if (!planSeleccionado) {
-    throw new Error('El plan seleccionado no existe.')
+  if (!token) {
+    throw new Error('No hay sesion activa para validar la suscripcion.')
   }
 
-  if (!planSeleccionado.activo) {
-    throw new Error('No se puede seleccionar un plan inactivo.')
+  const response = await fetch('/api/suscripcion/estado', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    cache: 'no-store',
+  })
+
+  const data = (await response.json()) as {
+    ok?: boolean
+    suscripcion?: SuscripcionConPlan | null
+    error?: string
   }
 
-  const client = getSupabaseClient()
-
-  const { data, error } = await client
-    .from('suscripciones')
-    .upsert(
-      {
-        usuario_id: input.usuario_id,
-        plan_id: input.plan_id,
-        estado: 'activo',
-        fecha_inicio: new Date().toISOString(),
-      },
-      { onConflict: 'usuario_id' }
-    )
-    .select('usuario_id, plan_id, estado, fecha_inicio')
-    .single()
-
-  let suscripcion: SuscripcionRow
-
-  if (error) {
-    // Si onConflict no esta soportado por constraint, usamos update/insert manual.
-    suscripcion = await guardarSuscripcionConFallback(input)
-  } else {
-    suscripcion = data as SuscripcionRow
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error ?? 'No se pudo validar la suscripcion en backend.')
   }
 
-  return {
-    usuario_id: suscripcion.usuario_id,
-    plan_id: suscripcion.plan_id,
-    estado: suscripcion.estado,
-    fecha_inicio: suscripcion.fecha_inicio,
-    plan: planSeleccionado,
-  }
+  return data.suscripcion ?? null
 }

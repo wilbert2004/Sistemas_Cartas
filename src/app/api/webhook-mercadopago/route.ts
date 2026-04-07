@@ -1,35 +1,63 @@
 import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { createHmac, timingSafeEqual } from 'node:crypto'
+import { activarPlanProPorPagoAprobado } from '@/services/backend/suscripciones-admin.service'
 
-const PLAN_PRO_ID = '727b8e67-1e00-45c2-9aab-6a8652e7fc92'
-const PLAN_GRATIS_ID = 'f02a5d25-a431-48cf-aa34-f82a5ecf45f7'
+const parseSignatureHeader = (raw: string) => {
+  const pairs = raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
 
-const mapearEstado = (estadoPago: string): 'activo' | 'pendiente' | 'cancelado' => {
-  if (estadoPago === 'approved') return 'activo'
-  if (estadoPago === 'pending' || estadoPago === 'in_process') return 'pendiente'
-  return 'cancelado'
-}
+  const bag: Record<string, string> = {}
 
-const actualizarSuscripcion = async (params: {
-  usuarioId: string
-  planId: string
-  estado: 'activo' | 'pendiente' | 'cancelado'
-}) => {
-  if (!supabaseAdmin) {
-    throw new Error('Falta configurar SUPABASE_SERVICE_ROLE_KEY para procesar webhooks.')
+  for (const pair of pairs) {
+    const [key, value] = pair.split('=')
+    if (!key || !value) continue
+    bag[key.trim()] = value.trim()
   }
 
-  const { error } = await supabaseAdmin.from('suscripciones').upsert(
-    {
-      usuario_id: params.usuarioId,
-      plan_id: params.planId,
-      estado: params.estado,
-      fecha_inicio: new Date().toISOString(),
-    },
-    { onConflict: 'usuario_id' }
-  )
+  return {
+    ts: bag.ts ?? '',
+    v1: bag.v1 ?? '',
+  }
+}
 
-  if (error) throw error
+const hashSeguroIgual = (expected: string, received: string) => {
+  const left = Buffer.from(expected, 'utf8')
+  const right = Buffer.from(received, 'utf8')
+
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return timingSafeEqual(left, right)
+}
+
+const validarFirmaWebhookMercadoPago = (request: Request, paymentId: string) => {
+  const secret =
+    process.env.MERCADOPAGO_WEBHOOK_SECRET ?? process.env.MERCADO_PAGO_WEBHOOK_SECRET
+
+  if (!secret) {
+    throw new Error('Falta configurar MERCADOPAGO_WEBHOOK_SECRET para validar webhook.')
+  }
+
+  const signatureHeader = request.headers.get('x-signature') ?? ''
+  const requestId = request.headers.get('x-request-id') ?? ''
+
+  if (!signatureHeader || !requestId) {
+    return false
+  }
+
+  const { ts, v1 } = parseSignatureHeader(signatureHeader)
+
+  if (!ts || !v1) {
+    return false
+  }
+
+  const manifest = `id:${paymentId};request-id:${requestId};ts:${ts};`
+  const digest = createHmac('sha256', secret).update(manifest).digest('hex')
+
+  return hashSeguroIgual(digest.toLowerCase(), v1.toLowerCase())
 }
 
 const procesarEventoPago = async (paymentId: string) => {
@@ -69,16 +97,17 @@ const procesarEventoPago = async (paymentId: string) => {
   }
 
   const planIdMetadata =
-    typeof pago.metadata?.plan_id === 'string' ? pago.metadata.plan_id : PLAN_PRO_ID
+    typeof pago.metadata?.plan_id === 'string' ? pago.metadata.plan_id : ''
 
-  const estado = mapearEstado(pago.status ?? 'cancelled')
-  const planId = estado === 'activo' || estado === 'pendiente' ? planIdMetadata : PLAN_GRATIS_ID
+  if (pago.status === 'approved') {
+    await activarPlanProPorPagoAprobado(usuarioId)
+  }
 
-  await actualizarSuscripcion({
+  return {
+    status: pago.status ?? 'unknown',
     usuarioId,
-    planId,
-    estado,
-  })
+    planIdMetadata,
+  }
 }
 
 export async function GET() {
@@ -104,9 +133,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, ignored: true })
     }
 
-    await procesarEventoPago(paymentId)
+    if (!validarFirmaWebhookMercadoPago(request, paymentId)) {
+      return NextResponse.json({ ok: false, error: 'Firma webhook invalida.' }, { status: 401 })
+    }
 
-    return NextResponse.json({ ok: true })
+    const resultado = await procesarEventoPago(paymentId)
+
+    return NextResponse.json({ ok: true, ...resultado })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error procesando webhook.'
     return NextResponse.json({ ok: false, error: message }, { status: 500 })

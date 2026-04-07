@@ -13,9 +13,8 @@ import {
 } from 'lucide-react'
 import { supabase } from '@/lib/supabaseClient'
 import {
-    guardarSuscripcion,
+    obtenerEstadoSuscripcionSeguro,
     obtenerPlanesDisponibles,
-    obtenerSuscripcion,
     type PlanSuscripcion,
 } from '@/services/suscripciones.service'
 
@@ -114,10 +113,31 @@ export default function SuscripcionPage() {
     const walletBrickRef = useRef<WalletBrick | null>(null)
     const sincronizacionInicialHechaRef = useRef<boolean>(false)
 
-    const cargarSuscripcionData = async (idUsuario: string) => {
+    const obtenerTokenSesion = async () => {
+        if (!supabase) {
+            throw new Error('No se pudo inicializar Supabase para obtener sesion.')
+        }
+
+        const {
+            data: { session },
+            error: sesionError,
+        } = await supabase.auth.getSession()
+
+        if (sesionError) {
+            throw sesionError
+        }
+
+        if (!session?.access_token) {
+            throw new Error('No hay sesion activa para validar suscripcion.')
+        }
+
+        return session.access_token
+    }
+
+    const cargarSuscripcionData = async () => {
         const [planesData, suscripcionActual] = await Promise.all([
             obtenerPlanesDisponibles(),
-            obtenerSuscripcion(idUsuario),
+            obtenerEstadoSuscripcionSeguro(),
         ])
 
         setPlanes(planesData)
@@ -144,7 +164,7 @@ export default function SuscripcionPage() {
                 if (!user?.id) throw new Error('Usuario no autenticado')
 
                 setUsuarioId(user.id)
-                await cargarSuscripcionData(user.id)
+                await cargarSuscripcionData()
                 setEstado('ready')
             } catch (e) {
                 const detalle = e instanceof Error ? e.message : 'No se pudo cargar el modulo de suscripcion.'
@@ -216,12 +236,14 @@ export default function SuscripcionPage() {
             setError('')
 
             const paymentIdNormalizado = paymentId?.trim()
-            const payload = paymentIdNormalizado ? { usuarioId, paymentId: paymentIdNormalizado } : { usuarioId }
+            const payload = paymentIdNormalizado ? { paymentId: paymentIdNormalizado } : {}
+            const token = await obtenerTokenSesion()
 
             const response = await fetch('/api/confirmar-suscripcion', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify(payload),
             })
@@ -243,7 +265,7 @@ export default function SuscripcionPage() {
                 throw new Error(data.error ?? 'No se pudo confirmar el estado del pago.')
             }
 
-            await cargarSuscripcionData(usuarioId)
+            await cargarSuscripcionData()
 
             if (silencioso && data.estado !== 'activo') {
                 return
@@ -330,14 +352,15 @@ export default function SuscripcionPage() {
                 }
 
                 setCreandoCheckout(true)
+                const token = await obtenerTokenSesion()
 
                 const response = await fetch('/api/crear-suscripcion', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
                     },
                     body: JSON.stringify({
-                        usuarioId,
                         planId: plan.id,
                     }),
                 })
@@ -356,13 +379,7 @@ export default function SuscripcionPage() {
                 return
             }
 
-            const suscripcion = await guardarSuscripcion({
-                usuario_id: usuarioId,
-                plan_id: plan.id,
-            })
-
-            setPlanActualId(suscripcion.plan_id)
-            setMensaje('Suscripcion actualizada ')
+            setMensaje('El plan gratis se asigna automaticamente por backend cuando expira la suscripcion.')
         } catch (e) {
             const detalle = e instanceof Error ? e.message : 'No se pudo actualizar la suscripcion.'
             setError(detalle)
@@ -371,7 +388,7 @@ export default function SuscripcionPage() {
             setGuardandoPlanId(null)
 
             if (usuarioId) {
-                await cargarSuscripcionData(usuarioId)
+                await cargarSuscripcionData()
             }
         }
     }
