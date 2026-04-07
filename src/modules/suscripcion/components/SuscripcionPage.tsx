@@ -477,21 +477,37 @@ export default function SuscripcionPage() {
                     }),
                 })
 
-                const data = (await response.json()) as {
+                const raw = await response.text()
+                let data = {} as {
+                    ok?: boolean
                     preferenceId?: string
                     initPoint?: string | null
                     sandboxInitPoint?: string | null
                     error?: string
+                    detail?: unknown
                     mpMode?: 'live' | 'test' | 'unknown'
+                    expectedMode?: 'live' | 'test' | 'unknown'
                     accessTokenSource?: string
                 }
 
+                try {
+                    data = (raw ? JSON.parse(raw) : {}) as typeof data
+                } catch {
+                    data = {
+                        error: raw ? `Respuesta no JSON: ${raw.slice(0, 220)}` : 'Respuesta vacia del backend.',
+                    }
+                }
+
                 console.log('Respuesta /api/crear-suscripcion:', {
+                    status: response.status,
                     ok: response.ok,
+                    error: data.error,
                     mpMode: data.mpMode,
+                    expectedMode: data.expectedMode,
                     accessTokenSource: data.accessTokenSource,
                     hasPreferenceId: Boolean(data.preferenceId),
                     hasInitPoint: Boolean(data.initPoint),
+                    detail: data.detail,
                 })
 
                 if (!response.ok || !data.preferenceId) {

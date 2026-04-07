@@ -13,29 +13,36 @@ const PLAN_GRATIS_ID = 'f02a5d25-a431-48cf-aa34-f82a5ecf45f7'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
+  const expectedMode = getMercadoPagoPublicKeyMode()
+  const resolvedToken = resolveMercadoPagoAccessToken(expectedMode)
+  const mpMode = resolvedToken?.mode ?? 'unknown'
+  const accessTokenSource = resolvedToken?.source ?? 'unknown'
+
   try {
     const user = await obtenerUsuarioAutenticadoDesdeRequest(request)
-
-    const expectedMode = getMercadoPagoPublicKeyMode()
-    const resolvedToken = resolveMercadoPagoAccessToken(expectedMode)
     const accessToken = resolvedToken?.token
 
     if (!accessToken) {
       return NextResponse.json(
-        { error: 'Falta configurar MERCADOPAGO_ACCESS_TOKEN en el backend.' },
+        {
+          ok: false,
+          error: 'Falta configurar MERCADOPAGO_ACCESS_TOKEN en el backend.',
+          mpMode,
+          expectedMode,
+          accessTokenSource,
+        },
         { status: 500 }
       )
     }
 
-    const mpMode = resolvedToken?.mode ?? 'unknown'
-
     if (expectedMode !== 'unknown' && expectedMode !== mpMode) {
       return NextResponse.json(
         {
+          ok: false,
           error: `Credenciales de MercadoPago desalineadas. Public key: ${expectedMode}, access token: ${mpMode}.`,
           mpMode,
           expectedMode,
-          accessTokenSource: resolvedToken?.source ?? 'unknown',
+          accessTokenSource,
         },
         { status: 500 }
       )
@@ -47,21 +54,21 @@ export async function POST(request: Request) {
 
     if (!planId) {
       return NextResponse.json(
-        { error: 'planId es requerido.' },
+        { ok: false, error: 'planId es requerido.', mpMode, expectedMode, accessTokenSource },
         { status: 400 }
       )
     }
 
     if (planId === PLAN_GRATIS_ID) {
       return NextResponse.json(
-        { error: 'El plan gratis no requiere pago en Checkout.' },
+        { ok: false, error: 'El plan gratis no requiere pago en Checkout.', mpMode, expectedMode, accessTokenSource },
         { status: 400 }
       )
     }
 
     if (planId !== PLAN_PRO_ID) {
       return NextResponse.json(
-        { error: 'Solo se permite checkout para el plan Pro.' },
+        { ok: false, error: 'Solo se permite checkout para el plan Pro.', mpMode, expectedMode, accessTokenSource },
         { status: 400 }
       )
     }
@@ -122,20 +129,38 @@ export async function POST(request: Request) {
       const detalle = detalleCausa || data.message || data.error || 'MercadoPago rechazo la preferencia.'
 
       return NextResponse.json(
-        { error: `No se pudo crear la preferencia en MercadoPago. ${detalle}`, detail: data },
+        {
+          ok: false,
+          error: `No se pudo crear la preferencia en MercadoPago. ${detalle}`,
+          detail: data,
+          mpMode,
+          expectedMode,
+          accessTokenSource,
+        },
         { status: 500 }
       )
     }
 
     return NextResponse.json({
+      ok: true,
       preferenceId: data.id,
       initPoint: data.init_point ?? null,
       sandboxInitPoint: data.sandbox_init_point ?? null,
       mpMode,
-      accessTokenSource: resolvedToken?.source ?? 'unknown',
+      expectedMode,
+      accessTokenSource,
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error inesperado al crear suscripcion.'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json(
+      {
+        ok: false,
+        error: message,
+        mpMode,
+        expectedMode,
+        accessTokenSource,
+      },
+      { status: 500 }
+    )
   }
 }
