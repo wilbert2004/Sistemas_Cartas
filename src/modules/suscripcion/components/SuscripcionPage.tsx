@@ -31,6 +31,10 @@ type BricksBuilder = {
         settings: {
             initialization: { preferenceId: string }
             customization?: Record<string, unknown>
+            callbacks?: {
+                onReady?: () => void
+                onError?: (error: unknown) => void
+            }
         }
     ) => Promise<WalletBrick>
 }
@@ -89,6 +93,52 @@ const beneficiosPlan = (plan: PlanSuscripcion) => {
         'Exportar en TXT',
         'Soporte por email',
     ]
+}
+
+const extraerDetalleMercadoPago = (error: unknown) => {
+    if (error instanceof Error) {
+        return error.message
+    }
+
+    if (typeof error === 'string') {
+        return error
+    }
+
+    if (error && typeof error === 'object') {
+        const record = error as Record<string, unknown>
+        const cause = record.cause
+        const message = record.message
+        const status = record.status
+
+        if (typeof message === 'string' && message.trim()) {
+            return message
+        }
+
+        if (Array.isArray(cause) && cause.length > 0) {
+            const causas = cause
+                .map((item) => {
+                    if (!item || typeof item !== 'object') return null
+                    const obj = item as Record<string, unknown>
+                    return obj.description ?? obj.code ?? null
+                })
+                .filter(Boolean)
+                .join(' | ')
+
+            if (causas) return causas
+        }
+
+        if (typeof status === 'number') {
+            return `Error de MercadoPago (status ${status}).`
+        }
+
+        try {
+            return JSON.stringify(record)
+        } catch {
+            return 'Error desconocido de MercadoPago.'
+        }
+    }
+
+    return 'Error desconocido de MercadoPago.'
 }
 
 export default function SuscripcionPage() {
@@ -353,14 +403,22 @@ export default function SuscripcionPage() {
                     'walletBrick_container',
                     {
                         initialization: { preferenceId },
+                        callbacks: {
+                            onReady: () => {
+                                console.log('Wallet Brick listo para interactuar.')
+                            },
+                            onError: (sdkError: unknown) => {
+                                console.error('MercadoPago Wallet Brick onError:', sdkError)
+                                const detalle = extraerDetalleMercadoPago(sdkError)
+                                setError(`Checkout Bricks devolvio un error: ${detalle}`)
+                            },
+                        },
                     }
                 )
                 console.log('Wallet Brick renderizado correctamente con preferenceId:', preferenceId)
             } catch (brickError) {
-                const detalle =
-                    brickError instanceof Error
-                        ? brickError.message
-                        : 'Error desconocido renderizando Wallet Brick.'
+                console.error('Error al renderizar Wallet Brick:', brickError)
+                const detalle = extraerDetalleMercadoPago(brickError)
                 setError(`No se pudo iniciar Checkout Bricks: ${detalle}`)
             }
         }
