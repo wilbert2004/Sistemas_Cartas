@@ -102,7 +102,7 @@ export async function POST(request: Request) {
 
       const pagos = data.results ?? []
       if (pagos.length === 0) {
-        return NextResponse.json({ ok: false, estado: 'sin_pagos' }, { status: 404 })
+        return NextResponse.json({ ok: true, estado: 'sin_pagos', paymentId: null })
       }
 
       const pagoAprobado = pagos.find((item) => item.status === 'approved')
@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     }
 
     if (!pago) {
-      return NextResponse.json({ ok: false, estado: 'sin_pagos' }, { status: 404 })
+      return NextResponse.json({ ok: true, estado: 'sin_pagos', paymentId: null })
     }
 
     const usuarioIdPago =

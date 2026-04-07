@@ -340,6 +340,8 @@ export default function SuscripcionPage() {
 
             if (data.estado === 'activo') {
                 setMensaje('Suscripcion Pro activada correctamente ')
+            } else if (data.estado === 'sin_pagos') {
+                setMensaje('Aun no hay pagos registrados para este usuario.')
             } else if (data.estado === 'pendiente') {
                 setMensaje('El pago aun esta pendiente de confirmacion.')
             } else {
