@@ -465,6 +465,32 @@ export default function SuscripcionPage() {
                     throw new Error('Falta NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY en .env.local')
                 }
 
+                if (modoPublicKey === 'test') {
+                    const token = await obtenerTokenSesion()
+                    const response = await fetch('/api/suscripcion/activar-pro-prueba', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                        },
+                    })
+
+                    const data = (await response.json()) as {
+                        ok?: boolean
+                        estado?: string
+                        error?: string
+                    }
+
+                    if (!response.ok || !data.ok) {
+                        throw new Error(data.error ?? 'No se pudo activar el plan Pro en modo prueba.')
+                    }
+
+                    setPreferenceId('')
+                    setCheckoutUrl('')
+                    setMensaje('Suscripcion Pro activada en modo TEST sin pasar por tarjeta.')
+                    return
+                }
+
                 setCreandoCheckout(true)
                 const token = await obtenerTokenSesion()
 
