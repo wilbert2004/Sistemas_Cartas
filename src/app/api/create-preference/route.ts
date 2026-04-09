@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { obtenerUsuarioAutenticadoDesdeRequest } from '@/lib/serverAuth'
 import { getBaseUrl } from '@/lib/getBaseUrl'
 import { getMercadoPagoPublicKeyMode, resolveMercadoPagoAccessToken } from '@/lib/mercadopagoEnv'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 type CreatePreferenceBody = {
   planCode?: 'pro'
@@ -10,7 +11,6 @@ type CreatePreferenceBody = {
 const PLAN_PRO = {
   code: 'pro',
   title: 'Plan Pro - Generador de Cartas',
-  unitPrice: 100,
 } as const
 
 export const dynamic = 'force-dynamic'
@@ -57,6 +57,32 @@ const shouldEnableAutoReturn = (url: string) => {
   }
 }
 
+const obtenerPrecioPlanPro = async () => {
+  if (!supabaseAdmin) {
+    throw new Error('Falta SUPABASE_SERVICE_ROLE_KEY para leer precio del plan Pro.')
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('planes')
+    .select('precio')
+    .ilike('nombre', PLAN_PRO.code)
+    .eq('activo', true)
+    .limit(1)
+
+  if (error) {
+    throw new Error(`No se pudo consultar precio del plan Pro: ${error.message}`)
+  }
+
+  const raw = data?.[0]?.precio
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error('El precio del plan Pro en la tabla planes debe ser mayor a 0.')
+  }
+
+  return parsed
+}
+
 export async function POST(request: Request) {
   const expectedMode = getMercadoPagoPublicKeyMode()
   const resolvedToken = resolveMercadoPagoAccessToken(expectedMode)
@@ -94,6 +120,7 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as CreatePreferenceBody
+    const unitPrice = await obtenerPrecioPlanPro()
 
     if (body.planCode && body.planCode !== PLAN_PRO.code) {
       return NextResponse.json(
@@ -112,7 +139,7 @@ export async function POST(request: Request) {
           title: PLAN_PRO.title,
           quantity: 1,
           currency_id: 'MXN',
-          unit_price: PLAN_PRO.unitPrice,
+          unit_price: unitPrice,
         },
       ],
       metadata: {
