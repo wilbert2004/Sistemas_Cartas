@@ -148,6 +148,11 @@ export async function POST(request: Request) {
       },
       external_reference: user.id,
       back_urls: backUrls,
+      payment_methods: {
+        excluded_payment_methods: [],
+        excluded_payment_types: [],
+        installments: 1,
+      },
     }
 
     // Evita el card-form en sandbox cuando hay errores intermitentes de Secure Fields.
