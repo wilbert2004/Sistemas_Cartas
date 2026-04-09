@@ -56,16 +56,11 @@ const mapPlan = (plan: Partial<PlanSuscripcion>): PlanSuscripcion => {
   const limiteCartasOriginal = Number(plan.limite_cartas ?? fallback?.limite_cartas ?? 0)
   const precioOriginal = String(plan.precio ?? fallback?.precio ?? '0')
 
-  const limiteCartasNormalizado =
-    nombre === 'pro' ? 9999 : nombre === 'gratis' ? 10 : limiteCartasOriginal
-
-  const precioNormalizado = nombre === 'pro' ? '50' : nombre === 'gratis' ? '0' : precioOriginal
-
   return {
     id: String(plan.id ?? fallback?.id ?? ''),
     nombre,
-    limite_cartas: limiteCartasNormalizado,
-    precio: precioNormalizado,
+    limite_cartas: Number.isFinite(limiteCartasOriginal) ? limiteCartasOriginal : 0,
+    precio: precioOriginal,
     activo: typeof plan.activo === 'boolean' ? plan.activo : (fallback?.activo ?? true),
   }
 }
