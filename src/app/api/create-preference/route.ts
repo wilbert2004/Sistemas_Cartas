@@ -148,12 +148,13 @@ export async function POST(request: Request) {
       },
       external_reference: user.id,
       back_urls: backUrls,
+      payment_methods: {
+        excluded_payment_methods: [],
+        excluded_payment_types: [],
+      },
     }
 
-    // Evita el card-form en sandbox cuando hay errores intermitentes de Secure Fields.
-    if (mpMode === 'test' && walletOnlyInTest) {
-      preferencePayload.purpose = 'wallet_purchase'
-    }
+
 
     const autoReturnEnabled = shouldEnableAutoReturn(backUrls.success)
     const canUseWebhookUrl = shouldEnableAutoReturn(baseUrl)
