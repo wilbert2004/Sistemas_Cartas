@@ -30,6 +30,11 @@ export const resolveMercadoPagoAccessToken = (
 ): { token: string; mode: MercadoPagoMode; source: string } | null => {
   const candidates: TokenCandidate[] = [
     {
+      name: 'MP_ACCESS_TOKEN',
+      value: process.env.MP_ACCESS_TOKEN?.trim() ?? '',
+      mode: detectMode(process.env.MP_ACCESS_TOKEN),
+    },
+    {
       name: 'MERCADOPAGO_ACCESS_TOKEN',
       value: process.env.MERCADOPAGO_ACCESS_TOKEN?.trim() ?? '',
       mode: detectMode(process.env.MERCADOPAGO_ACCESS_TOKEN),
